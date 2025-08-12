@@ -257,7 +257,7 @@ std::vector<common_chat_msg> common_chat_msgs_parse_oaicompat(const json & messa
 }
 
 template <>
-json common_chat_msgs_to_json_oaicompat(const std::vector<common_chat_msg> & msgs, bool concat_typed_text) {
+json common_chat_msgs_to_json_oaicompat(const std::vector<common_chat_msg> & msgs, bool concat_typed_text, bool add_reason_to_thinking) {
     json messages = json::array();
     for (const auto & msg : msgs) {
         if (!msg.content.empty() && !msg.content_parts.empty()) {
@@ -296,6 +296,11 @@ json common_chat_msgs_to_json_oaicompat(const std::vector<common_chat_msg> & msg
         }
         if (!msg.reasoning_content.empty()) {
             jmsg["reasoning_content"] = msg.reasoning_content;
+            // duplicate reasoning_content in thinking for gpt-oss chat template
+            // this allows client to continue operate on reasoning_content and handle tool use CoT back to model
+            if (add_reason_to_thinking) {
+                jmsg["thinking"] = msg.reasoning_content;
+            }
         }
         if (!msg.tool_name.empty()) {
             jmsg["name"] = msg.tool_name;
@@ -553,15 +558,17 @@ common_chat_templates_ptr common_chat_templates_init(
         }
     }
 
+    // Not needed if client parsing harmony correctly, the workaround may degrade quality
+
     // TODO @ngxson : this is a temporary hack to prevent chat template from throwing an error
     // Ref: https://github.com/ggml-org/llama.cpp/pull/15230#issuecomment-3173959633
-    if (default_template_src.find("<|channel|>") != std::string::npos
-            // search for the error message and patch it
-            && default_template_src.find("in message.content or") != std::string::npos) {
-        string_replace_all(default_template_src,
-            "{%- if \"<|channel|>analysis<|message|>\" in message.content or \"<|channel|>final<|message|>\" in message.content %}",
-            "{%- if false %}");
-    }
+    // if (default_template_src.find("<|channel|>") != std::string::npos
+    //         // search for the error message and patch it
+    //         && default_template_src.find("in message.content or") != std::string::npos) {
+    //     string_replace_all(default_template_src,
+    //         "{%- if \"<|channel|>analysis<|message|>\" in message.content or \"<|channel|>final<|message|>\" in message.content %}",
+    //         "{%- if false %}");
+    // }
 
     std::string token_bos = bos_token_override;
     std::string token_eos = eos_token_override;
@@ -1343,12 +1350,17 @@ static common_chat_params common_chat_params_init_gpt_oss(const common_chat_temp
     return data;
 }
 static void common_chat_parse_gpt_oss(common_chat_msg_parser & builder) {
+    // gpt-oss should be used with reasoning-format = none until harmony is supported if using llama-server
+
     // TODO @ngxson : this won't work with --special enabled, we should fix that
     builder.try_parse_reasoning("<|channel|>analysis<|message|>", "<|start|>assistant<|channel|>final<|message|>");
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
         return;
     }
+
+    // pass all output to content for client to parse
+    builder.add_content(builder.consume_rest());
 }
 
 static common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -1905,7 +1917,8 @@ static common_chat_params common_chat_templates_apply_jinja(
         : *tmpls->template_default;
     const auto & src = tmpl.source();
     const auto & caps = tmpl.original_caps();
-    params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
+    auto is_gpt_oss = src.find("<|channel|>") != std::string::npos;
+    params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content, is_gpt_oss);
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
     params.enable_thinking = inputs.enable_thinking;

@@ -199,7 +199,7 @@ common_chat_tool_choice common_chat_tool_choice_parse_oaicompat(const std::strin
 // Parses a JSON array of messages in OpenAI's chat completion API format.
 // T can be std::string containing JSON or nlohmann::ordered_json
 template <class T> std::vector<common_chat_msg> common_chat_msgs_parse_oaicompat(const T & messages);
-template <class T> T common_chat_msgs_to_json_oaicompat(const std::vector<common_chat_msg> & msgs, bool concat_typed_text = false);
+template <class T> T common_chat_msgs_to_json_oaicompat(const std::vector<common_chat_msg> & msgs, bool concat_typed_text = false, bool add_reason_to_thinking = false);
 
 // Parses a JSON array of tools in OpenAI's chat completion tool call API format.
 // T can be std::string containing JSON or nlohmann::ordered_json
